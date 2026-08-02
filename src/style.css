@@ -161,7 +161,7 @@ body.reduced-motion .case.opened { animation: none; }
 .podium .case { width: 72px; aspect-ratio: 3/4; font-size: 1.4rem; }
 .podium-label { font-size: 0.9rem; opacity: 0.85; }
 
-.hint { text-align: center; color: var(--brass); min-height: 1.4em; font-style: italic; }
+.hint { text-align: center; color: var(--brass); min-height: 1.4em; font-style: italic; position: sticky; top: 0; background: var(--bg, #0b0906); z-index: 5; padding: 6px 4px; }
 
 /* ---------- Offer card ---------- */
 .overlay {

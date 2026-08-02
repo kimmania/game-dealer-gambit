@@ -313,8 +313,8 @@ function maybeTutorial(): void {
   let step = 0;
   const steps: { icon: string; title: string; body: string }[] = [
     { icon: '💼', title: 'Pick your case', body: '26 cases, one fortune. Tap any case to claim it as yours — its value stays hidden until the end.' },
-    { icon: '🗑', title: 'Open cases', body: 'Each round you eliminate cases from the wall. Every value you remove changes the live EV at the top of the board.' },
-    { icon: '☎️', title: 'The Dealer calls', body: 'After each round the Dealer makes an offer based on live EV — and on your reputation. Check the Tell Sheet: every adjustment is published.' },
+    { icon: '🗑', title: 'Open cases', body: 'Each round you eliminate cases from the wall. Every value you remove changes the <strong>board average</strong> — the average of every amount still in play. Offers above it beat the math.' },
+    { icon: '☎️', title: 'The Dealer calls', body: 'After each round the Dealer makes an offer based on the board average — and on your reputation. Check the Tell Sheet: every adjustment is published.' },
     { icon: '🤝', title: 'Deal or hold', body: 'Take the DEAL to bank the offer, or say NO DEAL and keep going. Hold to the final two and you may swap cases. Winnings bank toward unlocking bigger tables.' },
   ];
   const renderStep = (): void => {

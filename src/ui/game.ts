@@ -84,7 +84,7 @@ function stars(result: { payout: number; caseValue: number }): number {
 function renderValueBoard(parent: HTMLElement): void {
   const ev = boardEV(state);
   const bar = el('div', 'ev-bar');
-  bar.appendChild(el('span', 'ev-label', '📊 LIVE EV'));
+  bar.appendChild(el('span', 'ev-label', '📊 BOARD AVERAGE'));
   bar.appendChild(el('span', 'ev-value', fmt(ev)));
   parent.appendChild(bar);
 
@@ -138,7 +138,7 @@ function hintText(): string {
   if (peekArmed) return '👁 Tap a case to peek inside';
   if (swapArmed) return '🔄 Tap a case to swap it for yours';
   switch (state.phase) {
-    case 'pick': return 'Choose your case';
+    case 'pick': return state.playerCase == null ? 'Choose your case' : `Case #${state.playerCase + 1} is yours — now tap cases on the wall to open them`;
     case 'eliminate':
       return `Round ${state.round} — open ${state.casesToOpenThisRound} more case${state.casesToOpenThisRound === 1 ? '' : 's'}`;
     case 'offer': return 'The Dealer calls…';
@@ -188,7 +188,7 @@ function renderOffer(): void {
   offerBox.appendChild(el('div', 'lbl', 'OFFER'));
   offerBox.appendChild(el('div', 'amt', fmt(offer.offer)));
   const evBox = el('div', 'box ev');
-  evBox.appendChild(el('div', 'lbl', 'LIVE EV'));
+  evBox.appendChild(el('div', 'lbl', 'BOARD AVERAGE'));
   evBox.appendChild(el('div', 'amt', fmt(ev)));
   cmp.appendChild(offerBox);
   cmp.appendChild(evBox);
@@ -197,7 +197,7 @@ function renderOffer(): void {
   card.appendChild(el('div', 'offer-tag', `Dealer read: ${offer.reputationApplied}`));
 
   if (state.leakedOfferPct !== null) {
-    card.appendChild(el('div', 'leak-tag', `📠 LEAKED: this offer is ${(state.leakedOfferPct * 100).toFixed(1)}% of EV`));
+    card.appendChild(el('div', 'leak-tag', `📠 LEAKED: this offer is ${(state.leakedOfferPct * 100).toFixed(1)}% of the board average`));
   } else if (state.leakAvailable) {
     const leak = document.createElement('button');
     leak.className = 'intel-btn';
@@ -277,8 +277,8 @@ function renderResult(parent: HTMLElement): void {
   if (r.offerTaken !== null) addRow('Offer taken', fmt(r.offerTaken));
   if (r.insurancePayout > 0) addRow('🛡 Insurance saved you', fmt(r.insurancePayout));
   else if (state.insuranceAvailable && r.outcome === 'deal') addRow('🛡 Insurance', 'No payout — deal was fair');
-  addRow('Starting EV', fmt(startingEv));
-  if (r.payout >= startingEv) addRow('Beat the EV!', '+10% bonus unlocked');
+  addRow('Starting board average', fmt(startingEv));
+  if (r.payout >= startingEv) addRow('Beat the average!', '+10% bonus unlocked');
   if (r.swappedAtEnd) addRow('Final swap', 'Yes');
   card.appendChild(lines);
 
@@ -308,10 +308,10 @@ function render(): void {
   app.appendChild(head);
 
   const screen = el('div', 'screen');
+  screen.appendChild(el('div', 'hint', hintText()));
   renderValueBoard(screen);
   renderPodium(screen);
   renderCaseWall(screen);
-  screen.appendChild(el('div', 'hint', hintText()));
   renderIntelBar(screen);
   app.appendChild(screen);
 
