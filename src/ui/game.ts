@@ -8,6 +8,7 @@ import {
   sndLatch, sndFlip, sndEliminated, sndRing, sndRegister, sndWin, sndBad, startMusic,
 } from './audio';
 import { loadCampaign } from './store';
+import { BOARDS } from '../engine/boards';
 import { fmt, el } from './app';
 
 export interface MountOpts {
@@ -100,13 +101,33 @@ function renderValueBoard(parent: HTMLElement): void {
   parent.appendChild(bar);
 
   const board = el('div', 'value-board');
-  const gone = new Set<number>();
-  for (const c of state.openedCases) gone.add(state.caseValues[c]);
+  // Track remaining copies of each amount so duplicates strike individually.
+  const remaining = new Map<number, number>();
+  for (const v of state.board.values) remaining.set(v, (remaining.get(v) ?? 0) + 1);
+  for (const c of state.openedCases) {
+    const v = state.caseValues[c];
+    remaining.set(v, (remaining.get(v) ?? 1) - 1);
+  }
   const sorted = [...state.board.values].sort((a, b) => a - b);
-  for (const v of sorted) {
-    const dead = gone.has(v);
-    if (dead) gone.delete(v);
-    board.appendChild(el('div', 'value-chip' + (dead ? ' gone' : ''), fmt(v)));
+  for (let i = 0; i < sorted.length; i++) {
+    const v = sorted[i];
+    const copies = remaining.get(v) ?? 0;
+    const dup = i + 1 < sorted.length && sorted[i + 1] === v;
+    if (copies <= 0 && !dup) {
+      board.appendChild(el('div', 'value-chip gone', fmt(v)));
+      continue;
+    }
+    if (dup) {
+      // Group identical amounts into one chip: show count, strike when all copies gone.
+      let run = 1;
+      while (i + run < sorted.length && sorted[i + run] === v) run++;
+      const total = run;
+      const label = copies > 0 && copies < total ? `${fmt(v)} ×${copies}` : fmt(v);
+      board.appendChild(el('div', 'value-chip' + (copies <= 0 ? ' gone' : ''), label));
+      i += run - 1;
+    } else {
+      board.appendChild(el('div', 'value-chip' + (copies <= 0 ? ' gone' : ''), fmt(v)));
+    }
   }
   parent.appendChild(board);
 }
@@ -291,6 +312,21 @@ function renderResult(parent: HTMLElement): void {
   addRow('Starting board average', fmt(startingEv));
   if (r.payout >= startingEv) addRow('Beat the average!', '+10% bonus unlocked');
   if (r.swappedAtEnd) addRow('Final swap', 'Yes');
+
+  // Progress toward the next table — show the math so the player knows what this win did.
+  const campaign = loadCampaign();
+  const thisBoard = state.board;
+  const before = Math.max(0, (campaign.boardWinnings[thisBoard.id] ?? 0) - r.payout);
+  const after = campaign.boardWinnings[thisBoard.id] ?? 0;
+  const target = thisBoard.threshold ?? 0;
+  const nextBoard = BOARDS.find((b) => b.id === thisBoard.id + 1);
+  if (nextBoard) {
+    addRow('Table progress', `${fmt(Math.min(after, target))} / ${fmt(target)}`);
+    if (after >= target && before < target) addRow('🔓 UNLOCKED', nextBoard.name);
+    else if (after < target) addRow('To unlock ' + nextBoard.name, `${fmt(target - after)} more`);
+  } else {
+    addRow('Final table cleared', '🏆 Campaign complete');
+  }
   card.appendChild(lines);
 
   const board = state.board;
