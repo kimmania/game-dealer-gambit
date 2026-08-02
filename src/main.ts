@@ -1,4 +1,4 @@
 import './style.css';
-import { mountGame } from './ui/game';
+import { mountApp } from './ui/app';
 
-mountGame(document.getElementById('app')!);
+mountApp(document.getElementById('app')!);

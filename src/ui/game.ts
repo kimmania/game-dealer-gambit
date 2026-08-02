@@ -1,25 +1,29 @@
 import {
-  createGame, pickCase, openCase, deal, noDeal, finalSwap,
-  boardEV, toRecord, NO_INTEL, CASE_COUNT,
+  createGame, pickCase, openCase, deal, noDeal, finalSwap, peek,
+  useFormulaLeak, useCaseSwap, boardEV, toRecord, CASE_COUNT,
 } from '../engine/game';
 import type { GameState } from '../engine/game';
-import { loadCampaign, saveCampaign } from './store';
+import type { GameRecord, IntelLoadout } from '../engine/types';
 import {
   sndLatch, sndFlip, sndEliminated, sndRing, sndRegister, sndWin, sndBad, startMusic,
 } from './audio';
+import { loadCampaign } from './store';
+import { fmt, el } from './app';
 
-const fmt = (n: number): string => '$' + Math.round(n).toLocaleString('en-US');
+export interface MountOpts {
+  boardId: number;
+  loadout: IntelLoadout;
+  onExit: () => void;
+  onFinish: (used: IntelLoadout, record: GameRecord, payout: number) => void;
+}
 
 let state: GameState;
 let startingEv = 0;
 let app: HTMLElement;
-
-function newGame(): void {
-  const campaign = loadCampaign();
-  state = createGame(1, (Math.random() * 2 ** 31) | 0, campaign.history, NO_INTEL);
-  startingEv = boardEV(state);
-  render();
-}
+let opts: MountOpts;
+let peekArmed = false;
+let swapArmed = false;
+let finished = false;
 
 function setState(next: GameState): void {
   const prevPhase = state.phase;
@@ -30,22 +34,38 @@ function setState(next: GameState): void {
 }
 
 function finishGame(): void {
-  const campaign = loadCampaign();
+  if (finished) return;
+  finished = true;
+  const used: IntelLoadout = {
+    peek: state.peekUsed,
+    formulaLeak: opts.loadout.formulaLeak && !state.leakAvailable,
+    caseSwap: opts.loadout.caseSwap && !state.swapAvailable,
+    // Insurance only burns when it actually pays out.
+    insurance: state.result!.insurancePayout > 0,
+  };
   const record = toRecord(state, startingEv);
-  campaign.history.push(record);
-  campaign.bank += state.result!.payout;
-  campaign.boardWinnings[1] = (campaign.boardWinnings[1] ?? 0) + state.result!.payout;
-  campaign.boardGames[1] = (campaign.boardGames[1] ?? 0) + 1;
-  saveCampaign(campaign);
+  opts.onFinish(used, record, state.result!.payout);
   if (state.result!.payout >= startingEv) sndWin(); else sndBad();
 }
 
 function onCaseTap(id: number): void {
   if (state.phase === 'pick') {
+    if (peekArmed) {
+      peekArmed = false;
+      sndFlip();
+      setState(peek(state, id));
+      return;
+    }
     sndLatch();
     setState(pickCase(state, id));
   } else if (state.phase === 'eliminate') {
     if (id === state.playerCase || state.openedCases.has(id)) return;
+    if (swapArmed) {
+      swapArmed = false;
+      sndFlip();
+      setState(useCaseSwap(state, id));
+      return;
+    }
     const value = state.caseValues[id];
     const wasBig = value >= boardEV(state);
     sndFlip();
@@ -61,13 +81,6 @@ function stars(result: { payout: number; caseValue: number }): number {
   return s;
 }
 
-function el(tag: string, cls = '', text = ''): HTMLElement {
-  const e = document.createElement(tag);
-  if (cls) e.className = cls;
-  if (text) e.textContent = text;
-  return e;
-}
-
 function renderValueBoard(parent: HTMLElement): void {
   const ev = boardEV(state);
   const bar = el('div', 'ev-bar');
@@ -81,7 +94,7 @@ function renderValueBoard(parent: HTMLElement): void {
   const sorted = [...state.board.values].sort((a, b) => a - b);
   for (const v of sorted) {
     const dead = gone.has(v);
-    if (dead) gone.delete(v); // strike only as many copies as opened
+    if (dead) gone.delete(v);
     board.appendChild(el('div', 'value-chip' + (dead ? ' gone' : ''), fmt(v)));
   }
   parent.appendChild(board);
@@ -90,17 +103,21 @@ function renderValueBoard(parent: HTMLElement): void {
 function renderCaseWall(parent: HTMLElement): void {
   const wall = el('div', 'case-wall');
   for (let i = 0; i < CASE_COUNT; i++) {
-    if (i === state.playerCase) continue; // player's case sits on the podium
+    if (i === state.playerCase) continue;
     const btn = document.createElement('button');
     btn.className = 'case';
     btn.setAttribute('aria-label', `Case ${i + 1}`);
     if (state.openedCases.has(i)) {
       btn.classList.add('opened');
       btn.disabled = true;
-      const v = el('span', 'case-value', fmt(state.caseValues[i]));
-      btn.appendChild(v);
+      btn.appendChild(el('span', 'case-value', fmt(state.caseValues[i])));
     } else {
       btn.textContent = String(i + 1);
+      const peekedVal = state.peeked.get(i);
+      if (peekedVal !== undefined) {
+        btn.classList.add('peeked');
+        btn.appendChild(el('span', 'case-value', fmt(peekedVal)));
+      }
       btn.disabled = state.phase !== 'pick' && state.phase !== 'eliminate';
       btn.addEventListener('click', () => onCaseTap(i));
     }
@@ -113,12 +130,13 @@ function renderPodium(parent: HTMLElement): void {
   if (state.playerCase === null) return;
   const pod = el('div', 'podium');
   pod.appendChild(el('span', 'podium-label', 'YOUR CASE'));
-  const c = el('div', 'case yours', String(state.playerCase + 1));
-  pod.appendChild(c);
+  pod.appendChild(el('div', 'case yours', String(state.playerCase + 1)));
   parent.appendChild(pod);
 }
 
 function hintText(): string {
+  if (peekArmed) return '👁 Tap a case to peek inside';
+  if (swapArmed) return '🔄 Tap a case to swap it for yours';
   switch (state.phase) {
     case 'pick': return 'Choose your case';
     case 'eliminate':
@@ -127,6 +145,35 @@ function hintText(): string {
     case 'finalSwap': return 'Final two. Keep your case, or swap?';
     default: return '';
   }
+}
+
+function renderIntelBar(parent: HTMLElement): void {
+  const items: { show: boolean; icon: string; label: string; armed: boolean; fn: () => void }[] = [
+    {
+      show: state.phase === 'pick' && !state.peekUsed && opts.loadout.peek,
+      icon: '👁', label: 'PEEK', armed: peekArmed,
+      fn: () => { peekArmed = !peekArmed; sndLatch(); render(); },
+    },
+    {
+      show: state.phase === 'eliminate' && state.swapAvailable,
+      icon: '🔄', label: 'SWAP', armed: swapArmed,
+      fn: () => { swapArmed = !swapArmed; sndLatch(); render(); },
+    },
+  ].filter((i) => i.show);
+  if (items.length === 0 && !(state.insuranceAvailable && state.phase !== 'done')) return;
+  const bar = el('div', 'intel-bar');
+  for (const i of items) {
+    const b = document.createElement('button');
+    b.className = 'intel-btn' + (i.armed ? ' armed' : '');
+    b.appendChild(el('span', 'menu-icon', i.icon));
+    b.appendChild(el('span', '', i.label));
+    b.addEventListener('click', i.fn);
+    bar.appendChild(b);
+  }
+  if (state.insuranceAvailable && state.phase !== 'done') {
+    bar.appendChild(el('span', 'intel-note', '🛡 Insurance active'));
+  }
+  parent.appendChild(bar);
 }
 
 function renderOffer(): void {
@@ -148,6 +195,30 @@ function renderOffer(): void {
   card.appendChild(cmp);
 
   card.appendChild(el('div', 'offer-tag', `Dealer read: ${offer.reputationApplied}`));
+
+  if (state.leakedOfferPct !== null) {
+    card.appendChild(el('div', 'leak-tag', `📠 LEAKED: this offer is ${(state.leakedOfferPct * 100).toFixed(1)}% of EV`));
+  } else if (state.leakAvailable) {
+    const leak = document.createElement('button');
+    leak.className = 'intel-btn';
+    leak.appendChild(el('span', 'menu-icon', '📠'));
+    leak.appendChild(el('span', '', 'FORMULA LEAK'));
+    leak.addEventListener('click', () => { sndRegister(); setState(useFormulaLeak(state)); });
+    card.appendChild(leak);
+  }
+
+  if (state.swapAvailable) {
+    const swap = document.createElement('button');
+    swap.className = 'intel-btn';
+    swap.appendChild(el('span', 'menu-icon', '🔄'));
+    swap.appendChild(el('span', '', 'CASE SWAP'));
+    swap.addEventListener('click', () => {
+      overlay.remove();
+      swapArmed = true;
+      render();
+    });
+    card.appendChild(swap);
+  }
 
   const row = el('div', 'deal-row');
   const dealBtn = document.createElement('button');
@@ -204,34 +275,34 @@ function renderResult(parent: HTMLElement): void {
   };
   addRow('Your case held', fmt(r.caseValue));
   if (r.offerTaken !== null) addRow('Offer taken', fmt(r.offerTaken));
-  if (r.insurancePayout > 0) addRow('Insurance payout', fmt(r.insurancePayout));
+  if (r.insurancePayout > 0) addRow('🛡 Insurance saved you', fmt(r.insurancePayout));
+  else if (state.insuranceAvailable && r.outcome === 'deal') addRow('🛡 Insurance', 'No payout — deal was fair');
   addRow('Starting EV', fmt(startingEv));
   if (r.payout >= startingEv) addRow('Beat the EV!', '+10% bonus unlocked');
   if (r.swappedAtEnd) addRow('Final swap', 'Yes');
   card.appendChild(lines);
 
-  const campaign = loadCampaign();
-  addRowBank(card, campaign.bank);
-
-  const again = document.createElement('button');
-  again.className = 'btn-deal hot';
-  again.textContent = '▶ PLAY AGAIN';
-  again.addEventListener('click', () => { sndLatch(); newGame(); });
-  card.appendChild(again);
+  const board = state.board;
+  const next = document.createElement('button');
+  next.className = 'btn-deal hot';
+  next.textContent = '▶ BACK TO TABLES';
+  next.addEventListener('click', () => { sndLatch(); opts.onExit(); });
+  card.appendChild(next);
+  card.appendChild(el('p', 'offer-tag', `${board.name} winnings count toward your next table.`));
 
   overlay.appendChild(card);
   parent.appendChild(overlay);
-}
-
-function addRowBank(card: HTMLElement, bank: number): void {
-  const p = el('p', 'offer-tag', `Career bank: ${fmt(bank)}`);
-  card.appendChild(p);
 }
 
 function render(): void {
   app.innerHTML = '';
 
   const head = el('div', 'game-head');
+  const home = document.createElement('button');
+  home.className = 'btn-nav';
+  home.textContent = '← TABLES';
+  home.addEventListener('click', () => opts.onExit());
+  head.appendChild(home);
   head.appendChild(el('span', '', `🎰 ${state.board.name}`));
   head.appendChild(el('span', '', state.phase === 'eliminate' || state.phase === 'offer' ? `Round ${state.round}/9` : ''));
   app.appendChild(head);
@@ -241,6 +312,7 @@ function render(): void {
   renderPodium(screen);
   renderCaseWall(screen);
   screen.appendChild(el('div', 'hint', hintText()));
+  renderIntelBar(screen);
   app.appendChild(screen);
 
   if (state.phase === 'offer') renderOffer();
@@ -248,12 +320,15 @@ function render(): void {
   else if (state.phase === 'done') renderResult(app);
 }
 
-export function mountGame(root: HTMLElement): void {
+export function mountGame(root: HTMLElement, options: MountOpts): void {
   app = root;
-  state = createGame(1, (Math.random() * 2 ** 31) | 0, loadCampaign().history, NO_INTEL);
+  opts = options;
+  peekArmed = false;
+  swapArmed = false;
+  finished = false;
+  state = createGame(opts.boardId, (Math.random() * 2 ** 31) | 0, loadCampaign().history, opts.loadout);
   startingEv = boardEV(state);
   render();
-  // Music + audio unlock on first gesture.
   const unlock = (): void => { startMusic(); document.removeEventListener('pointerdown', unlock); };
   document.addEventListener('pointerdown', unlock);
 }
