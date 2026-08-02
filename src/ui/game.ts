@@ -47,9 +47,10 @@ function onCaseTap(id: number): void {
   } else if (state.phase === 'eliminate') {
     if (id === state.playerCase || state.openedCases.has(id)) return;
     const value = state.caseValues[id];
+    const wasBig = value >= boardEV(state);
     sndFlip();
     setState(openCase(state, id));
-    sndEliminated(value >= boardEV(state));
+    sndEliminated(wasBig);
   }
 }
 
