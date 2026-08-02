@@ -24,6 +24,7 @@ let opts: MountOpts;
 let peekArmed = false;
 let swapArmed = false;
 let finished = false;
+let revealBanner: string | null = null;
 
 function setState(next: GameState): void {
   const prevPhase = state.phase;
@@ -69,8 +70,18 @@ function onCaseTap(id: number): void {
     const value = state.caseValues[id];
     const wasBig = value >= boardEV(state);
     sndFlip();
-    setState(openCase(state, id));
+    const next = openCase(state, id);
+    setState(next);
     sndEliminated(wasBig);
+    // Reveal beat: let the player register the revealed value before the offer appears.
+    if (next.phase === 'offer') {
+      revealBanner = fmt(value);
+      render();
+      window.setTimeout(() => {
+        revealBanner = null;
+        render();
+      }, 1300);
+    }
   }
 }
 
@@ -315,7 +326,15 @@ function render(): void {
   renderIntelBar(screen);
   app.appendChild(screen);
 
-  if (state.phase === 'offer') renderOffer();
+  if (state.phase === 'offer' && revealBanner) {
+    const banner = el('div', 'overlay reveal-beat');
+    const card = el('div', 'card reveal-card');
+    card.appendChild(el('div', 'lbl', 'REVEALED'));
+    card.appendChild(el('div', 'reveal-value', revealBanner));
+    card.appendChild(el('div', 'menu-tag', `Board average now ${fmt(boardEV(state))}`));
+    banner.appendChild(card);
+    app.appendChild(banner);
+  } else if (state.phase === 'offer') renderOffer();
   else if (state.phase === 'finalSwap') renderFinalSwap();
   else if (state.phase === 'done') renderResult(app);
 }

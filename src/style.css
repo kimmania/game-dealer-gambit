@@ -163,6 +163,13 @@ body.reduced-motion .case.opened { animation: none; }
 
 .hint { text-align: center; color: var(--brass); min-height: 1.4em; font-style: italic; position: sticky; top: 0; background: var(--bg, #0b0906); z-index: 5; padding: 6px 4px; }
 
+/* ---------- Reveal beat ---------- */
+.reveal-beat { pointer-events: none; background: rgba(0,0,0,0.45); }
+.reveal-card { text-align: center; animation: flip 0.3s ease; }
+.reveal-card .lbl { font-size: 0.8rem; letter-spacing: 2px; opacity: 0.8; }
+.reveal-card .reveal-value { font-size: 2.4rem; font-weight: bold; color: var(--brass); margin: 8px 0; }
+body.reduced-motion .reveal-card { animation: none; }
+
 /* ---------- Offer card ---------- */
 .overlay {
   position: fixed; inset: 0; background: rgba(0,0,0,0.72);
